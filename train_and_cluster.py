@@ -6,7 +6,6 @@ import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
-import matplotlib.pyplot as plt
 
 def scrape_karkidi_jobs(keyword="data science", pages=2):
     headers = {'User-Agent': 'Mozilla/5.0'}
