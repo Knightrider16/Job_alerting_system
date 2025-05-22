@@ -25,7 +25,7 @@ st.header("Browse Jobs by Interest")
 
 try:
     df_existing = pd.read_csv("clustered_jobs.csv")
-    cluster_options = sorted(df_existing['Skills'].unique())
+    cluster_options = sorted(df_existing['Cluster_name'].unique())
     selected_cluster = st.selectbox("Select Domain", cluster_options)
     filtered = df_existing[df_existing['Cluster_Name'] == selected_cluster]
     st.dataframe(filtered[['Title', 'Company', 'Location', 'Skills']])
