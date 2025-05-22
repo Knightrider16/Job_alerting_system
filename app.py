@@ -21,7 +21,7 @@ if st.button("Update Jobs"):
         st.success(f"There are a total of {len(df)} jobs that are of interest for you.")
         st.dataframe(df[['Title', 'Company', 'Location', 'Cluster_Name']])
 
-st.header("Browse Jobs by Interest")
+st.header("Browse Jobs by Skills")
 
 try:
     df_existing = pd.read_csv("clustered_jobs.csv")
