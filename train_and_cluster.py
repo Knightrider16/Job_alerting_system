@@ -1,17 +1,21 @@
+import requests
+from bs4 import BeautifulSoup
 import pandas as pd
+import time
 import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
-from bs4 import BeautifulSoup
-import requests
-import time
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+import matplotlib.pyplot as plt
 
-def scrape_karkidi_jobs(keyword="data science", pages=1):
+def scrape_karkidi_jobs(keyword="data science", pages=2):
     headers = {'User-Agent': 'Mozilla/5.0'}
     base_url = "https://www.karkidi.com/Find-Jobs/{page}/all/India?search={query}"
     jobs_list = []
 
     for page in range(1, pages + 1):
         url = base_url.format(page=page, query=keyword.replace(' ', '%20'))
+        print(f"Scraping page: {page}")
         response = requests.get(url, headers=headers)
         soup = BeautifulSoup(response.content, "html.parser")
 
@@ -39,52 +43,89 @@ def scrape_karkidi_jobs(keyword="data science", pages=1):
                 print(f"Error parsing job block: {e}")
                 continue
 
-        time.sleep(1)
+        time.sleep(1)  # Be kind to the server
 
-    return pd.DataFrame(jobs_list)
+    df = pd.DataFrame(jobs_list)
+    print(f"Scraped {len(df)} jobs.")
+    return df
 
-def generate_cluster_names(df, skill_column='Skills', cluster_column='Cluster', top_n=2):
-    from sklearn.feature_extraction.text import TfidfVectorizer
+def find_optimal_clusters(X, max_k=10):
+    """Compute silhouette scores for K=2 to max_k and plot."""
+    scores = []
+    K = range(2, max_k + 1)
+    for k in K:
+        model = KMeans(n_clusters=k, random_state=42)
+        labels = model.fit_predict(X)
+        score = silhouette_score(X, labels)
+        print(f"Silhouette score for k={k}: {score:.4f}")
+        scores.append(score)
 
+    best_k = K[scores.index(max(scores))]
+    print(f"Best number of clusters by silhouette score: {best_k}")
+    return best_k
+
+def generate_cluster_names(df, top_n=5):
+    """Generate meaningful cluster names by extracting top TF-IDF keywords for each cluster."""
     cluster_names = {}
-
-    for cluster_id in sorted(df[cluster_column].unique()):
-        cluster_skills = df[df[cluster_column] == cluster_id][skill_column].str.cat(sep=' ')
-        if not cluster_skills.strip():
-            cluster_names[cluster_id] = "Miscellaneous"
-            continue
-        tfidf = TfidfVectorizer(stop_words='english')
-        X = tfidf.fit_transform([cluster_skills])
-        scores = zip(tfidf.get_feature_names_out(), X.toarray()[0])
-        sorted_keywords = sorted(scores, key=lambda x: x[1], reverse=True)
-        top_keywords = [word for word, score in sorted_keywords[:top_n]]
-        cluster_label = " / ".join(top_keywords).title()
-        cluster_names[cluster_id] = cluster_label
-
+    for cluster in df['Cluster'].unique():
+        cluster_skills = df[df['Cluster'] == cluster]['Skills']
+        vectorizer = TfidfVectorizer(stop_words='english', max_features=1000)
+        X = vectorizer.fit_transform(cluster_skills)
+        # Average TF-IDF scores per term across all docs in cluster
+        mean_tfidf = X.mean(axis=0).A1
+        terms = vectorizer.get_feature_names_out()
+        # Top terms for cluster
+        top_terms = [terms[i] for i in mean_tfidf.argsort()[::-1][:top_n]]
+        cluster_names[cluster] = ", ".join(top_terms)
     return cluster_names
 
 def main():
-    # Load model and vectorizer
-    model = joblib.load("kmeans_model.pkl")
-    vectorizer = joblib.load("vectorizer.pkl")
+    print("Starting job scraping and clustering pipeline...")
 
-    # Scrape jobs
+    # Step 1: Scrape data
     df = scrape_karkidi_jobs(keyword="data science", pages=2)
-    df = df[df['Skills'].str.strip() != ""]  # remove empty skills
 
-    # Vectorize skills
-    X = vectorizer.transform(df['Skills'])
+    # Step 2: Remove jobs with empty skills
+    df = df[df['Skills'].str.strip() != ""].reset_index(drop=True)
+    if df.empty:
+        print("No jobs with skills found. Exiting.")
+        return
 
-    # Predict clusters
-    df['Cluster'] = model.predict(X)
+    # Step 3: Vectorize skills using TF-IDF
+    vectorizer = TfidfVectorizer(stop_words='english')
+    X = vectorizer.fit_transform(df['Skills'])
 
-    # Generate cluster names
+    # Save vectorizer for later use
+    joblib.dump(vectorizer, "vectorizer.pkl")
+    print("TF-IDF vectorizer saved as 'vectorizer.pkl'.")
+
+    # Step 4: Find best number of clusters using silhouette score
+    best_k = find_optimal_clusters(X, max_k=10)
+
+    # Step 5: Train final KMeans model with best_k clusters
+    model = KMeans(n_clusters=best_k, random_state=42)
+    clusters = model.fit_predict(X)
+    df['Cluster'] = clusters
+
+    # Save model
+    joblib.dump(model, "kmeans_model.pkl")
+    print(f"KMeans model trained with k={best_k} and saved as 'kmeans_model.pkl'.")
+
+    # Step 6: Evaluate and print final silhouette score
+    final_score = silhouette_score(X, clusters)
+    print(f"Final silhouette score for k={best_k}: {final_score:.4f}")
+
+    # Step 7: Generate cluster names (top keywords)
     cluster_name_map = generate_cluster_names(df)
     df['Cluster_Name'] = df['Cluster'].map(cluster_name_map)
 
-    # Save clustered jobs
+    print("Cluster names assigned:")
+    for c, name in cluster_name_map.items():
+        print(f"Cluster {c}: {name}")
+
+    # Step 8: Save clustered jobs to CSV
     df.to_csv("clustered_jobs.csv", index=False)
-    print("Jobs scraped, clustered, and saved successfully.")
+    print("Clustered job data saved to 'clustered_jobs.csv'.")
 
 if __name__ == "__main__":
     main()
