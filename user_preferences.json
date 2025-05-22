@@ -1,0 +1,10 @@
+[
+  {
+    "email": "user1@example.com",
+    "preferred_cluster": 0
+  },
+  {
+    "email": "user2@example.com",
+    "preferred_cluster": 3
+  }
+]
